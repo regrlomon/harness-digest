@@ -2,7 +2,7 @@ import os
 import requests
 import feedparser
 from datetime import datetime, timedelta, timezone
-import google.generativeai as genai
+from google import genai
 
 # ── 配置区 ──────────────────────────────────────────────
 SEARCH_KEYWORDS = ["harness"]
@@ -18,9 +18,7 @@ TRACKED_REPOS = [
 
 def search_new_repos():
     since = (datetime.now(timezone.utc) - timedelta(hours=13)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    headers = {
-        "Accept": "application/vnd.github.v3+json",
-    }
+    headers = {"Accept": "application/vnd.github.v3+json"}
     results = []
     for kw in SEARCH_KEYWORDS:
         resp = requests.get(
@@ -45,6 +43,8 @@ def fetch_changelogs():
     for repo in TRACKED_REPOS:
         feed = feedparser.parse(f"https://github.com/{repo}/releases.atom")
         for entry in feed.entries[:5]:
+            if not getattr(entry, "published_parsed", None):
+                continue
             published = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
             if published >= since:
                 releases.append({
@@ -57,8 +57,7 @@ def fetch_changelogs():
 
 
 def ai_summarize(new_repos, releases):
-    genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
     prompt = f"""你是 Harness 生态的技术信息筛选助手。
 
 过去 12 小时 GitHub 动态如下，请：
@@ -74,7 +73,11 @@ def ai_summarize(new_repos, releases):
 
 如无有价值内容，直接回复：本周期无重要动态。
 """
-    return model.generate_content(prompt).text
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=prompt,
+    )
+    return response.text
 
 
 def send_discord(content):
