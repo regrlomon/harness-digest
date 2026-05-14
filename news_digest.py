@@ -245,13 +245,30 @@ def build_embeds(data, title):
     return embeds
 
 
-def send_discord(embeds):
-    # Discord 单次最多 10 个 embed
+def send_discord(embeds, selector_options=None):
+    headers = {
+        "Authorization": f"Bot {os.environ['DISCORD_BOT_TOKEN']}",
+        "Content-Type": "application/json",
+    }
+    channel_id = os.environ["DISCORD_CHANNEL_ID"]
+    base_url = f"https://discord.com/api/v10/channels/{channel_id}/messages"
+
     for i in range(0, len(embeds), 10):
-        requests.post(
-            os.environ["DISCORD_WEBHOOK_URL"],
-            json={"embeds": embeds[i:i + 10]},
-        )
+        requests.post(base_url, headers=headers, json={"embeds": embeds[i:i + 10]})
+
+    if selector_options:
+        requests.post(base_url, headers=headers, json={
+            "content": "🔍 对哪个感兴趣？选择后将私信深度分析",
+            "components": [{
+                "type": 1,
+                "components": [{
+                    "type": 3,
+                    "custom_id": "deep_dive_selector",
+                    "placeholder": "选择一个项目或文章...",
+                    "options": selector_options,
+                }],
+            }],
+        })
 
 
 def main():
@@ -266,7 +283,8 @@ def main():
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
     embeds = build_embeds(data, f"技术动态 {now}")
-    send_discord(embeds)
+    selector_options = build_selector_options(data)
+    send_discord(embeds, selector_options)
     print("Done.")
 
 
