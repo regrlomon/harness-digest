@@ -1,9 +1,6 @@
 import os
 import requests
 import feedparser
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta, timezone
 import google.generativeai as genai
 
@@ -16,16 +13,12 @@ TRACKED_REPOS = [
     "harness/drone",
     "harness/ff-golang-server-sdk",
 ]
-
-SMTP_HOST = os.environ.get("EMAIL_SMTP_HOST", "smtp.163.com")
-SMTP_PORT = int(os.environ.get("EMAIL_SMTP_PORT", "465"))
 # ────────────────────────────────────────────────────────
 
 
 def search_new_repos():
     since = (datetime.now(timezone.utc) - timedelta(hours=13)).strftime("%Y-%m-%dT%H:%M:%SZ")
     headers = {
-        "Authorization": f"Bearer {os.environ['GITHUB_TOKEN']}",
         "Accept": "application/vnd.github.v3+json",
     }
     results = []
@@ -84,17 +77,6 @@ def ai_summarize(new_repos, releases):
     return model.generate_content(prompt).text
 
 
-def send_email(subject, body):
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"] = os.environ["EMAIL_USER"]
-    msg["To"] = os.environ["EMAIL_TO"]
-    msg.attach(MIMEText(body, "plain", "utf-8"))
-    with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT) as srv:
-        srv.login(os.environ["EMAIL_USER"], os.environ["EMAIL_PASS"])
-        srv.sendmail(os.environ["EMAIL_USER"], os.environ["EMAIL_TO"], msg.as_string())
-
-
 def send_discord(content):
     for chunk in [content[i:i + 1900] for i in range(0, len(content), 1900)]:
         requests.post(os.environ["DISCORD_WEBHOOK_URL"], json={"content": chunk})
@@ -106,10 +88,8 @@ def main():
 
     summary = ai_summarize(new_repos, releases)
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
-    subject = f"[Harness 动态] {now}"
 
-    send_email(subject, summary)
-    send_discord(f"**{subject}**\n\n{summary}")
+    send_discord(f"**[Harness 动态] {now}**\n\n{summary}")
     print("Done.")
 
 
