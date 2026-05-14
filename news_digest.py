@@ -2,7 +2,7 @@ import os
 import requests
 import feedparser
 from datetime import datetime, timedelta, timezone
-from google import genai
+import google.generativeai as genai
 
 # ── 配置区 ──────────────────────────────────────────────
 SEARCH_KEYWORDS = ["harness"]
@@ -57,7 +57,8 @@ def fetch_changelogs():
 
 
 def ai_summarize(new_repos, releases):
-    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    genai.configure(api_key=os.environ["GEMINI_API_KEY"])
+    model = genai.GenerativeModel("gemini-2.5-flash")
     prompt = f"""你是 Harness 生态的技术信息筛选助手。
 
 过去 12 小时 GitHub 动态如下，请：
@@ -73,11 +74,7 @@ def ai_summarize(new_repos, releases):
 
 如无有价值内容，直接回复：本周期无重要动态。
 """
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt,
-    )
-    return response.text
+    return model.generate_content(prompt).text
 
 
 def send_discord(content):
