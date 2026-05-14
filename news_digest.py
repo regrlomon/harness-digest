@@ -2,23 +2,56 @@ import os
 import base64
 import requests
 import feedparser
+from bs4 import BeautifulSoup
 from datetime import datetime, timedelta, timezone
 import google.generativeai as genai
 
 # ── 配置区 ──────────────────────────────────────────────
-SEARCH_KEYWORDS = ["harness"]
+SEARCH_KEYWORDS = ["harness", "agent workflow", "llm agent skill"]
 
 TRACKED_REPOS = [
     "harness/harness",
     "harness/gitness",
     "harness/drone",
-    "harness/ff-golang-server-sdk",
+]
+
+SCRAPE_BLOGS = [
+    {"name": "Anthropic News",        "base": "https://www.anthropic.com", "pattern": "/news/"},
+    {"name": "Anthropic Engineering",  "base": "https://www.anthropic.com", "pattern": "/engineering/"},
+    {"name": "Claude Blog",            "base": "https://claude.com",        "pattern": "/blog/"},
 ]
 # ────────────────────────────────────────────────────────
 
 
+def scrape_blog(blog):
+    list_url = blog["base"] + blog["pattern"].rstrip("/")
+    resp = requests.get(list_url, timeout=15)
+    if resp.status_code != 200:
+        return []
+    soup = BeautifulSoup(resp.text, "html.parser")
+    posts = []
+    seen = set()
+    for a in soup.select(f"a[href*='{blog['pattern']}']"):
+        title = a.get_text(strip=True)
+        href = a.get("href", "")
+        if not title or len(title) < 10:
+            continue
+        url = href if href.startswith("http") else f"{blog['base']}{href}"
+        if url in seen or url == blog["url"]:
+            continue
+        seen.add(url)
+        posts.append({"source": blog["name"], "title": title, "url": url, "summary": ""})
+    return posts[:5]
+
+
+def fetch_blogs():
+    posts = []
+    for blog in SCRAPE_BLOGS:
+        posts += scrape_blog(blog)
+    return posts
+
+
 def fetch_readme(repo_full_name):
-    """抓取仓库 README 前 1500 字符"""
     resp = requests.get(
         f"https://api.github.com/repos/{repo_full_name}/readme",
         headers={"Accept": "application/vnd.github.v3+json"},
@@ -71,30 +104,41 @@ def fetch_changelogs():
     return releases
 
 
-def ai_summarize(new_repos, releases):
+def fetch_blogs():
+    posts = []
+    for blog in SCRAPE_BLOGS:
+        posts += scrape_blog(blog)
+    return posts
+
+
+def ai_summarize(new_repos, releases, blog_posts):
     genai.configure(api_key=os.environ["GEMINI_API_KEY"])
     model = genai.GenerativeModel("gemini-2.5-flash")
-    prompt = f"""你是 Harness 生态的技术信息筛选助手。
+    prompt = f"""你是一个关注 AI Agent、CI/CD 和 Harness 生态的技术信息筛选助手。
 
-过去 12 小时 GitHub 动态如下，请按以下要求处理：
+过去 12 小时动态如下，请按以下要求处理：
 
-1. 过滤掉学习笔记、无 star、fork、个人练习等无价值仓库
-2. 将保留的项目按技术方向分组（如：CI/CD工具、AI代理框架、测试工具、基础设施等），组数不超过5个
-3. 每个分组输出格式如下：
+1. 过滤掉学习笔记、无 star、fork、个人练习等无价值内容
+2. 将保留内容按技术方向分组（如：Harness 生态、Agent 工作流与 Skill 实践、AI 框架更新、行业博客解读等），组数不超过 5 个
+3. 每个分组格式：
 
 ### 分组名称
-> 这个分组的技术方向说明（1-2句，解释为什么这些项目被归为一类）
+> 这个分组的技术方向说明（1-2句）
 
-- **项目名**：解决什么问题，技术方案是什么，对 Harness 生态有何意义
+- **项目/文章名**：解决什么问题，核心技术方案，值得关注的原因
 
-4. Changelog 单独一个分组，每条注明 breaking change / 新功能 / 性能改进
-5. 用中文输出
+4. Changelog 单独一组，注明 breaking change / 新功能 / 性能改进
+5. 博客文章重点提炼核心观点和对实践的指导意义
+6. 用中文输出
 
-## 新项目（{len(new_repos)} 个）
+## GitHub 新项目（{len(new_repos)} 个）
 {new_repos or '无'}
 
 ## Changelog（{len(releases)} 条）
 {releases or '无'}
+
+## 博客更新（{len(blog_posts)} 篇）
+{blog_posts or '无'}
 
 如无有价值内容，直接回复：本周期无重要动态。
 """
@@ -109,11 +153,12 @@ def send_discord(content):
 def main():
     new_repos = search_new_repos()
     releases = fetch_changelogs()
+    blog_posts = fetch_blogs()
 
-    summary = ai_summarize(new_repos, releases)
+    summary = ai_summarize(new_repos, releases, blog_posts)
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-    send_discord(f"**[Harness 动态] {now}**\n\n{summary}")
+    send_discord(f"**[技术动态] {now}**\n\n{summary}")
     print("Done.")
 
 
