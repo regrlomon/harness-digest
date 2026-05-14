@@ -132,11 +132,22 @@ def ai_analyze(new_repos, releases, blog_posts):
       "items": [
         {{
           "name": "项目或文章名",
+          "url": "https://github.com/owner/repo",
           "summary": "解决什么问题，核心方案，值得关注的原因"
         }}
       ]
     }}
   ],
+  "blog_group": {{
+    "items": [
+      {{
+        "name": "文章标题",
+        "url": "文章链接",
+        "source": "来源名称",
+        "summary": "文章核心内容，不超过60字"
+      }}
+    ]
+  }},
   "changelogs": [
     {{
       "repo": "仓库名",
@@ -147,7 +158,10 @@ def ai_analyze(new_repos, releases, blog_posts):
   ]
 }}
 
-没有有价值内容时返回：{{"has_content": false, "groups": [], "changelogs": []}}
+注意：博客更新必须全部放入 blog_group，不得混入 groups。
+没有有价值内容时返回：{{"has_content": false, "groups": [], "blog_group": {{"items": []}}, "changelogs": []}}
+
+注意：groups 中每个 item 的 url 必须与 GitHub 新项目原始数据中的 url 完全一致，不得修改或省略。
 
 ## GitHub 新项目
 {json.dumps(new_repos, ensure_ascii=False)}
@@ -176,6 +190,14 @@ def build_embeds(data, title):
             "color": GROUP_COLORS[i % len(GROUP_COLORS)],
             "fields": fields,
         })
+
+    blog_items = data.get("blog_group", {}).get("items", [])
+    if blog_items:
+        fields = [
+            {"name": f"[{item.get('source', '')}] {item['name']}", "value": f"{item.get('summary', '')}\n{item.get('url', '')}", "inline": False}
+            for item in blog_items
+        ]
+        embeds.append({"title": "📰 博客更新", "color": 0xEB459E, "fields": fields})
 
     changelogs = data.get("changelogs", [])
     if changelogs:
