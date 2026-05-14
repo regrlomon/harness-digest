@@ -1,4 +1,5 @@
 import os
+import json
 import base64
 import requests
 import feedparser
@@ -16,11 +17,66 @@ TRACKED_REPOS = [
 ]
 
 SCRAPE_BLOGS = [
-    {"name": "Anthropic News",        "base": "https://www.anthropic.com", "pattern": "/news/"},
-    {"name": "Anthropic Engineering",  "base": "https://www.anthropic.com", "pattern": "/engineering/"},
-    {"name": "Claude Blog",            "base": "https://claude.com",        "pattern": "/blog/"},
+    {"name": "Anthropic News",       "base": "https://www.anthropic.com", "pattern": "/news/"},
+    {"name": "Anthropic Engineering", "base": "https://www.anthropic.com", "pattern": "/engineering/"},
+    {"name": "Claude Blog",           "base": "https://claude.com",        "pattern": "/blog/"},
 ]
+
+GROUP_COLORS = [0x5865F2, 0x57F287, 0xFEE75C, 0xEB459E, 0xED4245]
+CHANGELOG_EMOJI = {"breaking_change": "🔴", "feature": "🟢", "improvement": "🔵"}
 # ────────────────────────────────────────────────────────
+
+
+def fetch_readme(repo_full_name):
+    resp = requests.get(
+        f"https://api.github.com/repos/{repo_full_name}/readme",
+        headers={"Accept": "application/vnd.github.v3+json"},
+    )
+    if resp.status_code != 200:
+        return ""
+    content = base64.b64decode(resp.json().get("content", "")).decode("utf-8", errors="ignore")
+    return content[:1500]
+
+
+def search_new_repos():
+    since = (datetime.now(timezone.utc) - timedelta(hours=13)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    headers = {"Accept": "application/vnd.github.v3+json"}
+    results = []
+    for kw in SEARCH_KEYWORDS:
+        resp = requests.get(
+            "https://api.github.com/search/repositories",
+            headers=headers,
+            params={"q": f"{kw} created:>{since}", "sort": "stars", "order": "desc", "per_page": 10},
+        )
+        if resp.status_code == 200:
+            for item in resp.json().get("items", []):
+                results.append({
+                    "name": item["full_name"],
+                    "description": item.get("description") or "",
+                    "stars": item["stargazers_count"],
+                    "url": item["html_url"],
+                    "readme": fetch_readme(item["full_name"]),
+                })
+    return results
+
+
+def fetch_changelogs():
+    since = datetime.now(timezone.utc) - timedelta(hours=13)
+    releases = []
+    for repo in TRACKED_REPOS:
+        feed = feedparser.parse(f"https://github.com/{repo}/releases.atom")
+        for entry in feed.entries[:5]:
+            if not getattr(entry, "published_parsed", None):
+                continue
+            published = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
+            if published >= since:
+                releases.append({
+                    "repo": repo,
+                    "title": entry.title,
+                    "url": entry.link,
+                    "body": entry.get("summary", "")[:1500],
+                })
+    return releases
 
 
 def scrape_blog(blog):
@@ -51,103 +107,98 @@ def fetch_blogs():
     return posts
 
 
-def fetch_readme(repo_full_name):
-    resp = requests.get(
-        f"https://api.github.com/repos/{repo_full_name}/readme",
-        headers={"Accept": "application/vnd.github.v3+json"},
-    )
-    if resp.status_code != 200:
-        return ""
-    content = base64.b64decode(resp.json().get("content", "")).decode("utf-8", errors="ignore")
-    return content[:1500]
-
-
-def search_new_repos():
-    since = (datetime.now(timezone.utc) - timedelta(hours=13)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    headers = {"Accept": "application/vnd.github.v3+json"}
-    results = []
-    for kw in SEARCH_KEYWORDS:
-        resp = requests.get(
-            "https://api.github.com/search/repositories",
-            headers=headers,
-            params={"q": f"{kw} created:>{since}", "sort": "stars", "order": "desc", "per_page": 10},
-        )
-        if resp.status_code == 200:
-            for item in resp.json().get("items", []):
-                readme = fetch_readme(item["full_name"])
-                results.append({
-                    "name": item["full_name"],
-                    "description": item.get("description") or "",
-                    "stars": item["stargazers_count"],
-                    "url": item["html_url"],
-                    "readme": readme,
-                })
-    return results
-
-
-def fetch_changelogs():
-    since = datetime.now(timezone.utc) - timedelta(hours=13)
-    releases = []
-    for repo in TRACKED_REPOS:
-        feed = feedparser.parse(f"https://github.com/{repo}/releases.atom")
-        for entry in feed.entries[:5]:
-            if not getattr(entry, "published_parsed", None):
-                continue
-            published = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
-            if published >= since:
-                releases.append({
-                    "repo": repo,
-                    "title": entry.title,
-                    "url": entry.link,
-                    "body": entry.get("summary", "")[:1500],
-                })
-    return releases
-
-
-def fetch_blogs():
-    posts = []
-    for blog in SCRAPE_BLOGS:
-        posts += scrape_blog(blog)
-    return posts
-
-
-def ai_summarize(new_repos, releases, blog_posts):
+def ai_analyze(new_repos, releases, blog_posts):
     genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-    model = genai.GenerativeModel("gemini-2.5-flash")
+    model = genai.GenerativeModel(
+        "gemini-2.5-flash",
+        generation_config={"response_mime_type": "application/json"},
+    )
     prompt = f"""你是一个关注 AI Agent、CI/CD 和 Harness 生态的技术信息筛选助手。
 
-过去 12 小时动态如下，请按以下要求处理：
+分析以下过去 12 小时的 GitHub 和博客动态，以 JSON 格式输出结果。
 
+要求：
 1. 过滤掉学习笔记、无 star、fork、个人练习等无价值内容
-2. 将保留内容按技术方向分组（如：Harness 生态、Agent 工作流与 Skill 实践、AI 框架更新、行业博客解读等），组数不超过 5 个
-3. 每个分组格式：
+2. 将保留内容按技术方向分组，组数不超过 5 个
+3. 每个 summary 不超过 80 字，用中文
 
-### 分组名称
-> 这个分组的技术方向说明（1-2句）
+输出 JSON 结构：
+{{
+  "has_content": true,
+  "groups": [
+    {{
+      "name": "分组名称",
+      "description": "分组说明，1-2句",
+      "items": [
+        {{
+          "name": "项目或文章名",
+          "summary": "解决什么问题，核心方案，值得关注的原因"
+        }}
+      ]
+    }}
+  ],
+  "changelogs": [
+    {{
+      "repo": "仓库名",
+      "title": "版本号",
+      "type": "breaking_change 或 feature 或 improvement",
+      "summary": "更新内容简述"
+    }}
+  ]
+}}
 
-- **项目/文章名**：解决什么问题，核心技术方案，值得关注的原因
+没有有价值内容时返回：{{"has_content": false, "groups": [], "changelogs": []}}
 
-4. Changelog 单独一组，注明 breaking change / 新功能 / 性能改进
-5. 博客文章重点提炼核心观点和对实践的指导意义
-6. 用中文输出
+## GitHub 新项目
+{json.dumps(new_repos, ensure_ascii=False)}
 
-## GitHub 新项目（{len(new_repos)} 个）
-{new_repos or '无'}
+## Changelog
+{json.dumps(releases, ensure_ascii=False)}
 
-## Changelog（{len(releases)} 条）
-{releases or '无'}
-
-## 博客更新（{len(blog_posts)} 篇）
-{blog_posts or '无'}
-
-如无有价值内容，直接回复：本周期无重要动态。
+## 博客更新
+{json.dumps(blog_posts, ensure_ascii=False)}
 """
-    return model.generate_content(prompt).text
+    response = model.generate_content(prompt)
+    return json.loads(response.text)
 
 
-def send_discord(content):
-    for chunk in [content[i:i + 1900] for i in range(0, len(content), 1900)]:
-        requests.post(os.environ["DISCORD_WEBHOOK_URL"], json={"content": chunk})
+def build_embeds(data, title):
+    embeds = [{"title": title, "color": 0x5865F2}]
+
+    for i, group in enumerate(data.get("groups", [])):
+        fields = [
+            {"name": item["name"], "value": item["summary"], "inline": False}
+            for item in group.get("items", [])
+        ]
+        embeds.append({
+            "title": f"📁 {group['name']}",
+            "description": group.get("description", ""),
+            "color": GROUP_COLORS[i % len(GROUP_COLORS)],
+            "fields": fields,
+        })
+
+    changelogs = data.get("changelogs", [])
+    if changelogs:
+        fields = [
+            {
+                "name": f"{CHANGELOG_EMOJI.get(cl.get('type', ''), '⚪')} {cl['repo']} {cl['title']}",
+                "value": cl["summary"],
+                "inline": False,
+            }
+            for cl in changelogs
+        ]
+        embeds.append({"title": "📋 Changelog", "color": 0xED4245, "fields": fields})
+
+    return embeds
+
+
+def send_discord(embeds):
+    # Discord 单次最多 10 个 embed
+    for i in range(0, len(embeds), 10):
+        requests.post(
+            os.environ["DISCORD_WEBHOOK_URL"],
+            json={"embeds": embeds[i:i + 10]},
+        )
 
 
 def main():
@@ -155,10 +206,14 @@ def main():
     releases = fetch_changelogs()
     blog_posts = fetch_blogs()
 
-    summary = ai_summarize(new_repos, releases, blog_posts)
-    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    data = ai_analyze(new_repos, releases, blog_posts)
+    if not data.get("has_content"):
+        print("No content.")
+        return
 
-    send_discord(f"**[技术动态] {now}**\n\n{summary}")
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    embeds = build_embeds(data, f"技术动态 {now}")
+    send_discord(embeds)
     print("Done.")
 
 
