@@ -105,3 +105,50 @@ ${data.content}`;
   const json = await res.json();
   return json.candidates?.[0]?.content?.parts?.[0]?.text ?? '分析失败，请稍后重试。';
 }
+
+const FOLLOWUP_DIRECTIVES = {
+  github: {
+    arch:    '深入分析该项目的技术架构，包括系统设计模式、核心模块依赖关系、关键技术选型原因和扩展性设计，用中文输出。',
+    trend:   '分析该项目的发展趋势，基于近期 PR、commit 和 open issues，评估活跃度并预测未来方向，用中文输出。',
+    issues:  '详细分析当前 open issues，按类型（bug/feature/discussion）分类，列出最值得关注的问题，评估社区健康度，用中文输出。',
+    compare: '对比该项目与主要竞品或替代方案，分析定位差异、核心优势和适用场景，用中文输出。',
+  },
+  blog: {
+    detail: '深入解析文章中的技术实现细节、算法或架构设计，列出具体的技术要点和难点，用中文输出。',
+    apply:  '分析文章内容的实际应用价值，列出具体落地场景，重点说明对 AI Agent 和 Harness 生态的影响，用中文输出。',
+  },
+};
+
+export async function analyzeFollowup(type, action, data, apiKey) {
+  const directive = FOLLOWUP_DIRECTIVES[type]?.[action] ?? '对以下内容做深度分析，用中文输出。';
+
+  let rawData;
+  if (type === 'github') {
+    const { repo, readme, issues, prs, commits } = data;
+    rawData = `项目: ${repo.full_name}
+描述: ${repo.description || '无'}
+语言: ${repo.language || '未知'}
+Stars: ${repo.stargazers_count} | Open Issues: ${repo.open_issues_count}
+README（节选）: ${readme}
+近期 PR: ${prs.slice(0, 5).map(p => `#${p.number} ${p.title}`).join(' | ') || '无'}
+近期 Commit: ${commits.slice(0, 5).map(c => c.commit.message.split('\n')[0]).join(' | ') || '无'}
+近期 Issues: ${issues.slice(0, 5).map(i => `#${i.number} ${i.title}`).join(' | ') || '无'}`;
+  } else {
+    rawData = `文章 URL: ${data.url ?? ''}\n内容: ${data.content ?? ''}`;
+  }
+
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: `${directive}\n\n---原始数据---\n${rawData}` }] }] }),
+      }
+    );
+    const json = await res.json();
+    return json.candidates?.[0]?.content?.parts?.[0]?.text ?? '分析失败，请稍后重试。';
+  } catch {
+    return '分析失败，请稍后重试。';
+  }
+}

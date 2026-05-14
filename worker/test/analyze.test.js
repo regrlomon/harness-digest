@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fetchGithubData, fetchBlogContent, analyzeWithGemini } from '../src/analyze.js';
+import { fetchGithubData, fetchBlogContent, analyzeWithGemini, analyzeFollowup } from '../src/analyze.js';
 
 describe('fetchGithubData', () => {
   beforeEach(() => vi.stubGlobal('fetch', vi.fn()));
@@ -106,5 +106,60 @@ describe('analyzeWithGemini', () => {
 
     const callBody = JSON.parse(fetch.mock.calls[0][1].body);
     expect(callBody.contents[0].parts[0].text).toContain('https://anthropic.com/blog/test');
+  });
+});
+
+describe('analyzeFollowup', () => {
+  const mockGithubData = {
+    repo: { full_name: 'harness/harness', description: 'CI/CD', stargazers_count: 1000, language: 'Go', open_issues_count: 50 },
+    readme: '# Harness',
+    issues: [{ number: 1, title: 'Bug' }],
+    prs: [{ number: 2, title: 'Feature' }],
+    commits: [{ commit: { message: 'feat: add thing' } }],
+  };
+
+  beforeEach(() => vi.stubGlobal('fetch', vi.fn()));
+
+  it.each(['arch', 'trend', 'issues', 'compare'])('calls gemini for github action: %s', async (action) => {
+    fetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ candidates: [{ content: { parts: [{ text: `result:${action}` }] } }] }),
+    });
+    const result = await analyzeFollowup('github', action, mockGithubData, 'key');
+    expect(result).toBe(`result:${action}`);
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining('gemini-2.5-flash'),
+      expect.objectContaining({ method: 'POST' })
+    );
+    const body = JSON.parse(fetch.mock.calls[0][1].body);
+    expect(body.contents[0].parts[0].text).toContain('harness/harness');
+  });
+
+  it.each(['detail', 'apply'])('calls gemini for blog action: %s', async (action) => {
+    fetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ candidates: [{ content: { parts: [{ text: `blog:${action}` }] } }] }),
+    });
+    const result = await analyzeFollowup('blog', action, { content: 'article text', url: 'https://example.com/post' }, 'key');
+    expect(result).toBe(`blog:${action}`);
+    const body = JSON.parse(fetch.mock.calls[0][1].body);
+    expect(body.contents[0].parts[0].text).toContain('https://example.com/post');
+  });
+
+  it('returns fallback on empty candidates', async () => {
+    fetch.mockResolvedValueOnce({ ok: true, json: async () => ({ candidates: [] }) });
+    const result = await analyzeFollowup('github', 'arch', mockGithubData, 'key');
+    expect(result).toBe('分析失败，请稍后重试。');
+  });
+
+  it('uses fallback directive for unknown type/action', async () => {
+    fetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ candidates: [{ content: { parts: [{ text: 'fallback result' }] } }] }),
+    });
+    const result = await analyzeFollowup('unknown', 'xyz', { url: 'https://x.com', content: 'text' }, 'key');
+    expect(result).toBe('fallback result');
+    const body = JSON.parse(fetch.mock.calls[0][1].body);
+    expect(body.contents[0].parts[0].text).toContain('深度分析');
   });
 });
