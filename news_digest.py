@@ -107,6 +107,31 @@ def fetch_blogs():
     return posts
 
 
+def build_selector_options(data):
+    options = []
+    for group in data.get("groups", []):
+        for item in group.get("items", []):
+            url = item.get("url", "")
+            if not url:
+                continue
+            repo = url.replace("https://github.com/", "")
+            options.append({
+                "label": f"[GitHub] {item['name']}"[:100],
+                "value": f"github:{repo}"[:100],
+                "description": item.get("summary", "")[:100],
+            })
+    for item in data.get("blog_group", {}).get("items", []):
+        url = item.get("url", "")
+        if not url:
+            continue
+        options.append({
+            "label": f"[Blog] {item['name']}"[:100],
+            "value": f"blog:{url}"[:100],
+            "description": item.get("summary", "")[:100],
+        })
+    return options[:25]
+
+
 def ai_analyze(new_repos, releases, blog_posts):
     genai.configure(api_key=os.environ["GEMINI_API_KEY"])
     model = genai.GenerativeModel(
