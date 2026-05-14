@@ -17,7 +17,7 @@ export async function createDMChannel(userId, botToken) {
 export async function sendMessage(channelId, content, botToken, components = []) {
   const body = { content };
   if (components.length > 0) body.components = components;
-  await fetch(`${DISCORD_API}/channels/${channelId}/messages`, {
+  const res = await fetch(`${DISCORD_API}/channels/${channelId}/messages`, {
     method: 'POST',
     headers: {
       Authorization: `Bot ${botToken}`,
@@ -25,6 +25,10 @@ export async function sendMessage(channelId, content, botToken, components = [])
     },
     body: JSON.stringify(body),
   });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(`Discord send message error: ${res.status} ${JSON.stringify(data)}`);
+  }
 }
 
 export async function editInteractionResponse(applicationId, interactionToken, content, botToken) {
