@@ -57,3 +57,54 @@ describe('fetchBlogContent', () => {
     expect(result).toBe('');
   });
 });
+
+describe('analyzeWithGemini', () => {
+  beforeEach(() => vi.stubGlobal('fetch', vi.fn()));
+
+  it('calls gemini api and returns text for github type', async () => {
+    fetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        candidates: [{ content: { parts: [{ text: '🔍 deep analysis result' }] } }],
+      }),
+    });
+
+    const data = {
+      repo: { full_name: 'harness/harness', description: 'CI/CD', stargazers_count: 1000, language: 'Go', open_issues_count: 50 },
+      readme: '# Harness',
+      issues: [{ number: 1, title: 'Bug' }],
+      prs: [{ number: 2, title: 'Feature' }],
+      commits: [{ commit: { message: 'feat: add thing' } }],
+    };
+
+    const result = await analyzeWithGemini('github', data, 'fake-key');
+    expect(result).toBe('🔍 deep analysis result');
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining('gemini-2.5-flash'),
+      expect.objectContaining({ method: 'POST' })
+    );
+  });
+
+  it('returns fallback message when candidates is empty', async () => {
+    fetch.mockResolvedValueOnce({ ok: true, json: async () => ({ candidates: [] }) });
+    const data = {
+      repo: { full_name: 'x', description: '', stargazers_count: 0, language: '', open_issues_count: 0 },
+      readme: '', issues: [], prs: [], commits: [],
+    };
+    const result = await analyzeWithGemini('github', data, 'key');
+    expect(result).toBe('分析失败，请稍后重试。');
+  });
+
+  it('calls gemini for blog type with url in prompt', async () => {
+    fetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ candidates: [{ content: { parts: [{ text: '📰 blog analysis' }] } }] }),
+    });
+
+    const result = await analyzeWithGemini('blog', { content: 'Article text here', url: 'https://anthropic.com/blog/test' }, 'key');
+    expect(result).toBe('📰 blog analysis');
+
+    const callBody = JSON.parse(fetch.mock.calls[0][1].body);
+    expect(callBody.contents[0].parts[0].text).toContain('https://anthropic.com/blog/test');
+  });
+});
