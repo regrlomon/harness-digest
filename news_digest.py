@@ -114,21 +114,27 @@ def build_selector_options(data):
             url = item.get("url", "")
             if not url:
                 continue
-            repo = url.replace("https://github.com/", "")
-            options.append({
+            if not url.startswith("https://github.com/"):
+                continue
+            repo = url.replace("https://github.com/", "")[:93]
+            opt = {
                 "label": f"[GitHub] {item['name']}"[:100],
-                "value": f"github:{repo}"[:100],
-                "description": item.get("summary", "")[:100],
-            })
+                "value": f"github:{repo}",
+            }
+            if summary := item.get("summary", "")[:100]:
+                opt["description"] = summary
+            options.append(opt)
     for item in data.get("blog_group", {}).get("items", []):
         url = item.get("url", "")
         if not url:
             continue
-        options.append({
+        opt = {
             "label": f"[Blog] {item['name']}"[:100],
-            "value": f"blog:{url}"[:100],
-            "description": item.get("summary", "")[:100],
-        })
+            "value": f"blog:{url[:95]}",
+        }
+        if summary := item.get("summary", "")[:100]:
+            opt["description"] = summary
+        options.append(opt)
     return options[:25]
 
 

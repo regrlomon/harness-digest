@@ -26,7 +26,7 @@ def test_blog_options():
     }
     opts = build_selector_options(data)
     assert len(opts) == 1
-    assert opts[0]["value"].startswith("blog:")
+    assert opts[0]["value"] == "blog:https://www.anthropic.com/news/claude-3-7-sonnet"
     assert len(opts[0]["value"]) <= 100
 
 def test_max_25_options():
