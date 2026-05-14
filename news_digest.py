@@ -86,7 +86,6 @@ def ai_summarize(new_repos, releases):
 > 这个分组的技术方向说明（1-2句，解释为什么这些项目被归为一类）
 
 - **项目名**：解决什么问题，技术方案是什么，对 Harness 生态有何意义
-  🔗 项目地址
 
 4. Changelog 单独一个分组，每条注明 breaking change / 新功能 / 性能改进
 5. 用中文输出
