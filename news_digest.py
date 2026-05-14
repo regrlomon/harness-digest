@@ -1,4 +1,5 @@
 import os
+import base64
 import requests
 import feedparser
 from datetime import datetime, timedelta, timezone
@@ -16,6 +17,18 @@ TRACKED_REPOS = [
 # ────────────────────────────────────────────────────────
 
 
+def fetch_readme(repo_full_name):
+    """抓取仓库 README 前 1500 字符"""
+    resp = requests.get(
+        f"https://api.github.com/repos/{repo_full_name}/readme",
+        headers={"Accept": "application/vnd.github.v3+json"},
+    )
+    if resp.status_code != 200:
+        return ""
+    content = base64.b64decode(resp.json().get("content", "")).decode("utf-8", errors="ignore")
+    return content[:1500]
+
+
 def search_new_repos():
     since = (datetime.now(timezone.utc) - timedelta(hours=13)).strftime("%Y-%m-%dT%H:%M:%SZ")
     headers = {"Accept": "application/vnd.github.v3+json"}
@@ -28,11 +41,13 @@ def search_new_repos():
         )
         if resp.status_code == 200:
             for item in resp.json().get("items", []):
+                readme = fetch_readme(item["full_name"])
                 results.append({
                     "name": item["full_name"],
                     "description": item.get("description") or "",
                     "stars": item["stargazers_count"],
                     "url": item["html_url"],
+                    "readme": readme,
                 })
     return results
 
@@ -51,7 +66,7 @@ def fetch_changelogs():
                     "repo": repo,
                     "title": entry.title,
                     "url": entry.link,
-                    "body": entry.get("summary", "")[:800],
+                    "body": entry.get("summary", "")[:1500],
                 })
     return releases
 
@@ -61,10 +76,20 @@ def ai_summarize(new_repos, releases):
     model = genai.GenerativeModel("gemini-2.5-flash")
     prompt = f"""你是 Harness 生态的技术信息筛选助手。
 
-过去 12 小时 GitHub 动态如下，请：
-1. 过滤掉学习笔记、无 star、fork 类无价值仓库
-2. 提炼 changelog 中的 breaking change 和重要新功能
-3. 用中文输出，言简意赅
+过去 12 小时 GitHub 动态如下，请按以下要求处理：
+
+1. 过滤掉学习笔记、无 star、fork、个人练习等无价值仓库
+2. 将保留的项目按技术方向分组（如：CI/CD工具、AI代理框架、测试工具、基础设施等），组数不超过5个
+3. 每个分组输出格式如下：
+
+### 分组名称
+> 这个分组的技术方向说明（1-2句，解释为什么这些项目被归为一类）
+
+- **项目名**：解决什么问题，技术方案是什么，对 Harness 生态有何意义
+  🔗 项目地址
+
+4. Changelog 单独一个分组，每条注明 breaking change / 新功能 / 性能改进
+5. 用中文输出
 
 ## 新项目（{len(new_repos)} 个）
 {new_repos or '无'}
