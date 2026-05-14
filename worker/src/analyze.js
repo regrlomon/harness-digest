@@ -14,7 +14,7 @@ export async function fetchGithubData(repoFullName, githubToken) {
   let readme = '';
   if (readmeRes.ok) {
     const readmeData = await readmeRes.json();
-    readme = atob(readmeData.content.replace(/\n/g, '')).slice(0, 2000);
+    readme = atob((readmeData.content || '').replace(/\n/g, '')).slice(0, 2000);
   }
 
   return {
@@ -27,16 +27,20 @@ export async function fetchGithubData(repoFullName, githubToken) {
 }
 
 export async function fetchBlogContent(url) {
-  const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
-  if (!res.ok) return '';
-  const html = await res.text();
-  return html
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 5000);
+  try {
+    const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    if (!res.ok) return '';
+    const html = await res.text();
+    return html
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 5000);
+  } catch {
+    return '';
+  }
 }
 
 export async function analyzeWithGemini(type, data, apiKey) {

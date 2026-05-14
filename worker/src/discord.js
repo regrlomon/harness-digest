@@ -10,6 +10,7 @@ export async function createDMChannel(userId, botToken) {
     body: JSON.stringify({ recipient_id: userId }),
   });
   const data = await res.json();
+  if (!res.ok) throw new Error(`Discord DM channel error: ${res.status} ${JSON.stringify(data)}`);
   return data.id;
 }
 
