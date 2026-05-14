@@ -37,7 +37,7 @@ def scrape_blog(blog):
         if not title or len(title) < 10:
             continue
         url = href if href.startswith("http") else f"{blog['base']}{href}"
-        if url in seen or url == blog["url"]:
+        if url in seen or url == list_url:
             continue
         seen.add(url)
         posts.append({"source": blog["name"], "title": title, "url": url, "summary": ""})
