@@ -2,6 +2,10 @@ name = "harness-digest-worker"
 main = "src/index.js"
 compatibility_date = "2024-01-01"
 
+[[kv_namespaces]]
+binding = "CONTEXT_KV"
+id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
+
 # Secrets are set via: wrangler secret put <KEY>
 # Required secrets: DISCORD_PUBLIC_KEY, DISCORD_BOT_TOKEN, GEMINI_API_KEY
 # Optional: GITHUB_TOKEN (raises GitHub API rate limit from 60 to 5000 req/hr)
